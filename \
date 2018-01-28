@@ -1,0 +1,187 @@
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+
+#define  WIDTH 800
+#define  HEIGHT 600
+
+#ifdef NDEBUG
+	const int8_t enable_layers = 0;
+#else
+	const int8_t enable_layers = 1;
+#endif
+
+#define LAYER_COUNT 1
+char *requested_layers[LAYER_COUNT] = { "VK_LAYER_LUNARG_standard_validation" };
+
+VkResult CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT *create_info, const VkAllocationCallbacks *allocator, VkDebugReportCallbackEXT *callback)
+{
+	PFN_vkCreateDebugReportCallbackEXT func = (PFN_vkCreateDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT");
+	if (func == NULL)
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+
+	return func(instance, create_info, allocator, callback);
+}
+
+void DestroyDebugReportCallbackEXT(VkInstance instance, VkDebugReportCallbackEXT callback, const VkAllocationCallbacks *allocator)
+{
+	PFN_vkDestroyDebugReportCallbackEXT func = (PFN_vkDestroyDebugReportCallbackEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT");
+	if (func != NULL)
+		func(instance, callback, allocator);
+}
+
+GLFWwindow *Create_Window();
+VkInstance Create_Vulkan_Instance();
+int Get_Available_Layers(char *available_layers[LAYER_COUNT]);
+VkDebugReportCallbackEXT Setup_Debug_Callback(VkInstance instance);
+static VKAPI_ATTR VkBool32 VKAPI_CALL Debug_Callback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT obj_type, uint64_t obj, size_t location, int32_t code, const char *layer_prefix, const char *msg, void *user_data);
+
+int main(int argc, char *argv[])
+{
+	GLFWwindow *window = Create_Window();
+
+	VkInstance instance = Create_Vulkan_Instance();
+	VkDebugReportCallbackEXT callback = Setup_Debug_Callback(instance);
+		
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+	}
+	
+	DestroyDebugReportCallbackEXT(instance, callback, NULL);
+	vkDestroyInstance(instance, NULL);
+	glfwDestroyWindow(window);
+	glfwTerminate();
+
+	return 0;
+}
+
+GLFWwindow *Create_Window()
+{
+	glfwInit();
+
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+	GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan Window", NULL, NULL);
+
+	return window;
+}
+
+VkInstance Create_Vulkan_Instance()
+{
+	VkApplicationInfo app_info;
+	app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+	app_info.pNext = NULL;
+	app_info.pApplicationName = "Hello Triangle";
+	app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+	app_info.pEngineName = "No Engine";
+	app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+	app_info.apiVersion = VK_API_VERSION_1_0;
+
+	VkInstanceCreateInfo create_info;
+	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	create_info.pNext = NULL;
+	create_info.pApplicationInfo = &app_info;
+	create_info.flags = 0;	
+
+	uint32_t glfw_extension_count = 0;
+	const char **glfw_extensions;
+
+	glfw_extensions = glfwGetRequiredInstanceExtensions(&glfw_extension_count);
+
+	if (enable_layers) {
+		++glfw_extension_count;
+		glfw_extensions = realloc(glfw_extensions, glfw_extension_count * sizeof(char *));
+		glfw_extensions[glfw_extension_count - 1] = VK_EXT_DEBUG_REPORT_EXTENSION_NAME;
+	}
+
+	create_info.enabledExtensionCount = glfw_extension_count;
+	create_info.ppEnabledExtensionNames = glfw_extensions;
+
+	printf("Added %d extensions.\n", create_info.enabledExtensionCount);
+	for (int i = 0; i < create_info.enabledExtensionCount; ++i)
+		printf("%s\n", create_info.ppEnabledExtensionNames[i]);
+
+	char *available_layers[LAYER_COUNT];
+	int available_layer_count = Get_Available_Layers(available_layers);
+
+	if (enable_layers) {
+		create_info.enabledLayerCount = available_layer_count;
+		create_info.ppEnabledLayerNames = (const char* const*) available_layers;
+		printf("Added %d layers.\n", create_info.enabledLayerCount);
+		for (int i = 0; i < create_info.enabledLayerCount; ++i)
+			printf("%s\n", create_info.ppEnabledLayerNames[i]);
+	} else {
+		create_info.enabledLayerCount = 0;
+		create_info.ppEnabledLayerNames = NULL;
+	}
+
+	VkInstance instance;
+	VkResult result = vkCreateInstance(&create_info, NULL, &instance);
+
+	if (result != VK_SUCCESS) {
+		printf("Failed to create instance: %d.\n", result);
+		return NULL;
+	}
+
+	return instance;
+}
+
+
+int Get_Available_Layers(char *available_layers[LAYER_COUNT])
+{
+	uint32_t layer_properties_count;
+	vkEnumerateInstanceLayerProperties(&layer_properties_count, NULL);
+	
+	if (layer_properties_count == 0)
+		return layer_properties_count;
+
+	VkLayerProperties *layer_properties = malloc(layer_properties_count * sizeof(VkLayerProperties));
+	vkEnumerateInstanceLayerProperties(&layer_properties_count, layer_properties);
+	
+	int available_layer_count = 0;
+	for (int i = 0; i < LAYER_COUNT; ++i) {
+		for (int j = 0; j < layer_properties_count; ++j) {
+			if (strcmp(requested_layers[i], layer_properties[j].layerName) != 0)
+				continue;
+
+			available_layers[available_layer_count++] = requested_layers[i];
+		}
+	}
+
+	free(layer_properties);
+
+	return available_layer_count;
+}
+
+VkDebugReportCallbackEXT Setup_Debug_Callback(VkInstance instance)
+{
+	if (!enable_layers)
+		return NULL;
+
+	VkDebugReportCallbackCreateInfoEXT create_info;
+	create_info.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+	create_info.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+	create_info.pfnCallback = Debug_Callback;
+
+	VkDebugReportCallbackEXT callback;
+	VkResult result = CreateDebugReportCallbackEXT(instance, &create_info, NULL, &callback);
+
+	if (result != VK_SUCCESS) {
+		printf("Failed to set up debug callback: %d.\n", result);
+		return NULL;
+	}
+
+	return callback;
+}
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL Debug_Callback(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT obj_type, uint64_t obj, size_t location, int32_t code, const char *layer_prefix, const char *msg, void *user_data)
+{
+	printf("Validation error: %s\n", msg);
+
+	return VK_FALSE;
+}
